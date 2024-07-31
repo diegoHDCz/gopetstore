@@ -1,0 +1,6 @@
+# yaml-language-server: ...
+package: spec
+generate:
+  gin-server: true
+  models: true
+output: ./internal/api/spec/petstore.spec.go
