@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github/diegoHDCz/gopet/internal/api/spec"
+	"github/diegoHDCz/gopet/internal/utils"
 	"log"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -75,18 +76,25 @@ func (s *Store) UpdatePet(body *spec.Pet) (*spec.Pet, error) {
 
 	ctx := context.TODO()
 
-	filter := bson.D{{"_id", body.Id}}
+	id, _ := utils.StringToID(*body.Id)
+
+	filter := bson.D{{"_id", id}}
 
 	update := bson.D{{"$set", bson.D{{"name", body.Name},
 		{"photoUrls", body.PhotoUrls}, {"category", body.Category}, {"status", body.Status}}}}
 
-	_, err := collection.UpdateOne(ctx, filter, update)
+	result, err := collection.UpdateOne(ctx, filter, update)
+
+	fmt.Printf("Documents matched: %v\n", result.MatchedCount)
+	fmt.Printf("Documents updated: %v\n", result.ModifiedCount)
 
 	if err != nil {
 		return nil, err
 	}
-
-	return body, nil
+	if result.ModifiedCount > 0 {
+		return body, nil
+	}
+	return nil, errors.New("something went wrong")
 }
 
 func (s *Store) DeleteDocumentById(petId *primitive.ObjectID) error {
