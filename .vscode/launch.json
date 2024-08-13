@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Gin Application",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/petstore/petstore.go",
+            "env": {
+              "MONGO_URI": "mongodb+srv://root:T2ZbD5ZWKSzBzRRN@bibipe-rent-car.1axq0pg.mongodb.net/?retryWrites=true&w=majority&appName=bibipe-rent-car",
+              "DB_NAME": "petstore",
+              "GIN_MODE": "debug"
+            },
+            "args": [],
+            "showLog": true,
+            "trace": "verbose",
+            "cwd": "${workspaceFolder}" // Set the working director
+        }
+    ]
+  }

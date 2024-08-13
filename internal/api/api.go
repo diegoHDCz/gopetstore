@@ -1,135 +1,203 @@
 package api
 
 import (
+	"errors"
 	"github/diegoHDCz/gopet/internal/api/spec"
 	"github/diegoHDCz/gopet/internal/mongostore"
+	"github/diegoHDCz/gopet/internal/utils"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
-type store interface{}
+type store interface {
+	SavePet(body *spec.StorePet) (*primitive.ObjectID, error)
+	GetTagsByName(tagNames *[]string) (*[]spec.Tag, error)
+	UpdatePet(body *spec.Pet) (*spec.Pet, error)
+	DeleteDocumentById(petId *primitive.ObjectID) error
+	GetOnePetById(petId *primitive.ObjectID) (*spec.Pet, error)
+	FindPetsByTagsId(queryIDs *[]string) (*[]spec.Pet, error)
+}
 
 type PetAPI struct {
 	store  store
 	logger *zap.Logger
 }
 
-func NewPetAPI(store *mongo.Database, logger *zap.Logger) PetAPI {
-	return PetAPI{mongostore.New(store), logger}
+func NewPetAPI(db *mongo.Database, logger *zap.Logger) PetAPI {
+	return PetAPI{mongostore.New(db), logger}
 }
 
 // Add a new pet to the store
 // (POST /pet)
-func (api *PetAPI) AddPet(c *gin.Context) {
-	panic("not implemented") // TODO: Implement
+func (api PetAPI) AddPet(c *gin.Context) {
+	internalServerMessage := "sometthing went wrong"
+	badRequestMessage := "request is not valid"
+	var body spec.StorePet
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		api.logger.Error("error parsing json ", zap.Error(err))
+		c.JSON(http.StatusBadRequest, spec.Error{Message: &badRequestMessage})
+		return
+	}
+	api.logger.Debug("body received parsed ", zap.Any("json", body))
+
+	tagsNames := make([]string, len(*body.Tags))
+
+	for i, tag := range *body.Tags {
+		api.logger.Debug("tag", zap.Any("json", tag))
+		tagsNames[i] = *tag.Name
+	}
+
+	api.logger.Debug("tag ", zap.Any("json", tagsNames))
+
+	body.Tags, _ = api.store.GetTagsByName(&tagsNames)
+
+	result, err := api.store.SavePet(&body)
+
+	if err != nil {
+		api.logger.Error("error parsing json ", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerMessage})
+		return
+	}
+	strId := result.Hex()
+	rs := spec.Pet{
+		Id:        &strId,
+		Category:  body.Category,
+		Name:      *body.Category,
+		Tags:      body.Tags,
+		PhotoUrls: body.PhotoUrls,
+		Status:    (*spec.PetStatus)(body.Status),
+	}
+
+	c.JSON(http.StatusCreated, &rs)
+
 }
 
 // Update an existing pet
 // (PUT /pet)
-func (api *PetAPI) UpdatePet(c *gin.Context) {
-	panic("not implemented") // TODO: Implement
-}
+func (api PetAPI) UpdatePet(c *gin.Context) {
+	badRequestMessage := "request is not valid"
+	internalServerMessage := "sometthing went wrong"
+	documentNotFound := "document not found"
+	var body spec.Pet
+	if err := c.ShouldBindJSON(&body); err != nil {
+		api.logger.Error("error parsing json ", zap.Error(err))
+		c.JSON(http.StatusBadRequest, spec.Error{Message: &badRequestMessage})
+		return
+	}
 
-// Finds Pets by status
-// (GET /pet/findByStatus)
-func (api *PetAPI) FindPetsByStatus(c *gin.Context, params spec.FindPetsByStatusParams) {
-	panic("not implemented") // TODO: Implement
+	api.logger.Debug("body parsed", zap.Any("json", body))
+
+	res, err := api.store.UpdatePet(&body)
+	if err != nil {
+		api.logger.Error("error parsing json ", zap.Error(err))
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusInternalServerError, spec.Error{Message: &documentNotFound})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerMessage})
+		return
+	}
+
+	c.JSON(http.StatusOK, &res)
 }
 
 // Finds Pets by tags
 // (GET /pet/findByTags)
-func (api *PetAPI) FindPetsByTags(c *gin.Context, params spec.FindPetsByTagsParams) {
-	panic("not implemented") // TODO: Implement
+func (api PetAPI) FindPetsByTags(c *gin.Context, params spec.FindPetsByTagsParams) {
+	tagsParams := c.QueryArray("tags")
+
+	notFoundMessage := "not found"
+	internalServerError := "something went wrong"
+
+	api.logger.Debug("olha ", zap.Any("query", tagsParams))
+
+	tags, err := api.store.GetTagsByName(&tagsParams)
+
+	if err != nil {
+		api.logger.Error("Error retrieving data ", zap.Error(err))
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, spec.Error{Message: &notFoundMessage})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerError})
+	}
+
+	queryIDs := make([]string, len(*tags))
+
+	for i, docTag := range *tags {
+
+		if docTag.Id == nil {
+			api.logger.Error("Error retrieving data ", zap.String("error", "ID is null"))
+		}
+
+		queryIDs[i] = *docTag.Id
+
+	}
+	api.logger.Debug("queries", zap.Any("my ids", &tags))
+	res, err := api.store.FindPetsByTagsId(&queryIDs)
+	if err != nil {
+		api.logger.Error("Error retrieving data ", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerError})
+		return
+	}
+
+	c.JSON(http.StatusOK, &res)
 }
 
 // Deletes a pet
 // (DELETE /pet/{petId})
-func (api *PetAPI) DeletePet(c *gin.Context, petId int64, params spec.DeletePetParams) {
-	panic("not implemented") // TODO: Implement
+func (api PetAPI) DeletePet(c *gin.Context, petId spec.ObjectId) {
+	internalServerError := "something went wrong"
+	notFoundMessage := "not found"
+
+	oid, err := utils.StringToID(petId)
+
+	api.logger.Debug("pet id ", zap.Any("query", oid))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerError})
+		return
+	}
+	if err := api.store.DeleteDocumentById(oid); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, spec.Error{Message: &notFoundMessage})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerError})
+		return
+	}
+
+	c.JSON(http.StatusNoContent, nil)
+
 }
 
 // Find pet by ID
 // (GET /pet/{petId})
-func (api *PetAPI) GetPetById(c *gin.Context, petId int64) {
-	panic("not implemented") // TODO: Implement
-}
+func (api PetAPI) GetPetById(c *gin.Context, petId spec.ObjectId) {
+	internalServerError := "something went wrong"
+	notFoundMessage := "not found"
 
-// Updates a pet in the store with form data
-// (POST /pet/{petId})
-func (api *PetAPI) UpdatePetWithForm(c *gin.Context, petId int64, params spec.UpdatePetWithFormParams) {
-	panic("not implemented") // TODO: Implement
-}
+	api.logger.Debug("pet id ", zap.Any("query", petId))
 
-// uploads an image
-// (POST /pet/{petId}/uploadImage)
-func (api *PetAPI) UploadFile(c *gin.Context, petId int64, params spec.UploadFileParams) {
-	panic("not implemented") // TODO: Implement
-}
+	oid, err := utils.StringToID(petId)
 
-// Returns pet inventories by status
-// (GET /store/inventory)
-func (api *PetAPI) GetInventory(c *gin.Context) {
-	panic("not implemented") // TODO: Implement
-}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerError})
+		return
+	}
+	res, err := api.store.GetOnePetById(oid)
 
-// Place an order for a pet
-// (POST /store/order)
-func (api *PetAPI) PlaceOrder(c *gin.Context) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Delete purchase order by ID
-// (DELETE /store/order/{orderId})
-func (api *PetAPI) DeleteOrder(c *gin.Context, orderId int64) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Find purchase order by ID
-// (GET /store/order/{orderId})
-func (api *PetAPI) GetOrderById(c *gin.Context, orderId int64) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Create user
-// (POST /user)
-func (api *PetAPI) CreateUser(c *gin.Context) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Creates list of users with given input array
-// (POST /user/createWithList)
-func (api *PetAPI) CreateUsersWithListInput(c *gin.Context) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Logs user into the system
-// (GET /user/login)
-func (api *PetAPI) LoginUser(c *gin.Context, params spec.LoginUserParams) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Logs out current logged in user session
-// (GET /user/logout)
-func (api *PetAPI) LogoutUser(c *gin.Context) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Delete user
-// (DELETE /user/{username})
-func (api *PetAPI) DeleteUser(c *gin.Context, username string) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Get user by user name
-// (GET /user/{username})
-func (api *PetAPI) GetUserByName(c *gin.Context, username string) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Update user
-// (PUT /user/{username})
-func (api *PetAPI) UpdateUser(c *gin.Context, username string) {
-	panic("not implemented") // TODO: Implement
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, spec.Error{Message: &notFoundMessage})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, spec.Error{Message: &internalServerError})
+		return
+	}
+	c.JSON(http.StatusOK, &res)
 }

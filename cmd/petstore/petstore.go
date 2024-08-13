@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github/diegoHDCz/gopet/internal/api"
 	"github/diegoHDCz/gopet/internal/api/spec"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,7 +30,7 @@ func main() {
 	defer cancel()
 
 	if err := run(ctx); err != nil {
-		fmt.Println(os.Stderr, err.Error())
+		log.Println(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 	fmt.Println("GoodBye :)")
